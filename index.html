@@ -242,7 +242,10 @@
   };
 
   // ---------- helpers ----------
-  function status(msg, isError) { const s = $('#status'); s.textContent = msg; s.className = isError ? 'error' : ''; }
+  function status(msg, isError) {
+    const s = $('#status'); s.textContent = msg; s.className = isError ? 'error' : '';
+    if (msg) s.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
   const wp = p => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
   const secs = d => parseInt(d || '0', 10) || 0;
   const fmtTime = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -262,11 +265,19 @@
   }
 
   async function gpost(url, body, mask) {
-    const r = await fetch(url, {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    let r;
+    try {
+      r = await fetch(url, {
+      signal: ctrl.signal,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': mask },
       body: JSON.stringify(body)
     });
+    } catch (e) {
+      throw new Error(e.name === 'AbortError' ? 'Google didn’t respond within 20 seconds. Check your connection and try again.' : 'Couldn’t reach Google (' + e.message + '). Check your connection.');
+    } finally { clearTimeout(timer); }
     const data = await r.json().catch(() => null);
     if (!r.ok) {
       const msg = data?.error?.message || (Array.isArray(data) && data[0]?.error?.message) || ('Google returned error ' + r.status);
@@ -381,7 +392,9 @@
     const toText = $('#to').value.trim();
     if (!toText) return status('Enter where you’re going.', true);
 
+    if (document.activeElement) document.activeElement.blur();
     $('#go').disabled = true;
+    $('#go').textContent = 'Finding routes…';
     $('#results').innerHTML = '';
     try {
       status('Finding your start point…');
@@ -461,6 +474,7 @@
       status(msg, true);
     } finally {
       $('#go').disabled = false;
+      $('#go').textContent = 'Find routes';
     }
   }
 
