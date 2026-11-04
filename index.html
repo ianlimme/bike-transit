@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1B998B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bike+Transit">
+<title>Bike + transit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #EEF2F0;
+    --surface: #FFFFFF;
+    --ink: #14213D;
+    --muted: #5C677D;
+    --line: #D5DDD9;
+    --bike: #1B998B;
+    --rail: #D99A00;
+    --bus: #3D5A80;
+    --walk: #A7B1AE;
+    --wait: #DDE4E1;
+    --error: #B42318;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0F1A1E;
+      --surface: #16252B;
+      --ink: #E7EEEC;
+      --muted: #93A3A0;
+      --line: #27393F;
+      --bike: #34C3B1;
+      --rail: #F0B429;
+      --bus: #7FA7D9;
+      --walk: #5B6B68;
+      --wait: #22343A;
+      --error: #FF8A80;
+    }
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 17px;
+    line-height: 1.45;
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 20px 18px 48px; }
+  .app { margin: 0 0 18px; color: var(--muted); font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .app svg { flex: none; }
+
+  .hero-label { display: block; font-size: 34px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 10px; }
+  input, button { font: inherit; color: inherit; }
+  input[type=text], input[type=time], input[type=number], input[type=password] {
+    width: 100%;
+    background: var(--surface);
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    min-height: 48px;
+  }
+  #to { font-size: 20px; padding: 14px 16px; border-width: 2px; border-color: var(--ink); }
+  input:focus-visible, button:focus-visible, summary:focus-visible, a:focus-visible {
+    outline: 3px solid var(--bike); outline-offset: 2px;
+  }
+  .field { margin-top: 14px; }
+  .field > label { display: block; font-size: 15px; color: var(--muted); margin-bottom: 4px; }
+  .inline { display: flex; gap: 8px; }
+  .inline input { flex: 1; min-width: 0; }
+  .ghost {
+    flex: none; background: transparent; border: 1.5px solid var(--line); border-radius: 10px;
+    padding: 0 12px; min-height: 48px; cursor: pointer; color: var(--ink);
+  }
+  .hint { font-size: 14px; color: var(--muted); margin: 4px 0 0; }
+  .primary {
+    width: 100%; margin-top: 18px; min-height: 54px; border: 0; border-radius: 12px;
+    background: var(--bike); color: #fff; font-weight: 700; font-size: 18px; cursor: pointer;
+  }
+  .primary:disabled { opacity: 0.6; cursor: progress; }
+
+  #status { min-height: 1.4em; margin: 16px 0 0; color: var(--muted); }
+  #status.error { color: var(--error); }
+
+  .result {
+    background: var(--surface); border-radius: 14px; padding: 16px; margin-top: 14px;
+    border: 1.5px solid var(--line);
+  }
+  .result.best { border-color: var(--bike); }
+  .result.base { background: transparent; border-style: dashed; }
+  .headline { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .mins { font-size: 30px; font-weight: 700; line-height: 1; }
+  .mins small { font-size: 16px; font-weight: 400; color: var(--muted); }
+  .arrive { color: var(--muted); }
+  .tag { display: inline-block; margin-top: 6px; font-size: 14px; padding: 2px 8px; border-radius: 999px; background: var(--wait); }
+  .tag.good { background: var(--bike); color: #fff; }
+  .start { margin: 10px 0 0; font-weight: 700; }
+
+  .strip { display: flex; height: 26px; margin: 12px 0 10px; border-radius: 6px; overflow: hidden; gap: 2px; }
+  .seg {
+    min-width: 6px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden;
+  }
+  .seg.bike { background: var(--bike); }
+  .seg.park, .seg.wait { background: var(--wait); color: var(--muted); }
+  .seg.park { background-image: repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 6px); }
+  .seg.walk { background: var(--walk); }
+  .seg.rail { background: var(--rail); }
+  .seg.bus { background: var(--bus); }
+
+  ol.steps { margin: 0; padding-left: 20px; font-size: 15px; }
+  ol.steps li { margin: 2px 0; }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 15px; }
+  .links a { color: var(--bike); font-weight: 700; }
+
+  details { margin-top: 32px; border-top: 1.5px solid var(--line); padding-top: 12px; }
+  summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  #setup { background: var(--surface); border: 2px solid var(--bike); border-radius: 14px; padding: 16px; margin-bottom: 20px; }
+  #setup h2 { margin: 0 0 6px; font-size: 20px; }
+  #setup p { margin: 0 0 10px; color: var(--muted); font-size: 15px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .result { animation: in 0.25s ease-out both; }
+    @keyframes in { from { opacity: 0; transform: translateY(4px); } }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="app">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="5.5" cy="17" r="3.5"/><circle cx="18.5" cy="17" r="3.5"/><path d="M5.5 17 9 9h6l3.5 8M9 9l3 8h-1M14 6h3"/></svg>
+    Bike + transit
+  </p>
+
+  <section id="setup" hidden>
+    <h2>Add your Google API key</h2>
+    <p>It stays on this phone only. You can change it later in Settings.</p>
+    <div class="inline">
+      <input type="password" id="keyInput" placeholder="Paste API key" autocomplete="off" spellcheck="false">
+      <button type="button" class="ghost" id="saveKey">Save</button>
+    </div>
+  </section>
+
+  <form id="trip" autocomplete="off">
+    <label for="to" class="hero-label">Where to?</label>
+    <input type="text" id="to" list="recent" placeholder="Place, address or postcode">
+    <datalist id="recent"></datalist>
+
+    <div class="field">
+      <label for="from">From</label>
+      <div class="inline">
+        <input type="text" id="from" placeholder="Home address or postcode">
+        <button type="button" class="ghost" id="here">Use my location</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="leave">Leave at</label>
+      <input type="time" id="leave">
+      <p class="hint">Leave blank to go now.</p>
+    </div>
+
+    <button type="submit" class="primary" id="go">Find routes</button>
+  </form>
+
+  <p id="status" role="status" aria-live="polite"></p>
+  <section id="results"></section>
+
+  <details id="settings">
+    <summary>Settings</summary>
+    <div class="grid">
+      <div class="field"><label for="maxKm">Max cycle (km)</label><input type="number" id="maxKm" min="0.3" max="10" step="0.1"></div>
+      <div class="field"><label for="speed">Cycle speed (km/h)</label><input type="number" id="speed" min="5" max="35" step="1"></div>
+      <div class="field"><label for="parkRail">Parking at stations (min)</label><input type="number" id="parkRail" min="0" max="15" step="1"></div>
+      <div class="field"><label for="parkBus">Parking at bus stops (min)</label><input type="number" id="parkBus" min="0" max="15" step="1"></div>
+      <div class="field"><label for="busCount">Bus stops to check</label><input type="number" id="busCount" min="0" max="20" step="1"></div>
+    </div>
+    <p class="hint">Checking more bus stops finds more options but uses more of your free Google allowance.</p>
+    <div class="field">
+      <label for="keyEdit">Google API key</label>
+      <div class="inline">
+        <input type="password" id="keyEdit" autocomplete="off" spellcheck="false">
+        <button type="button" class="ghost" id="saveKey2">Save</button>
+      </div>
+    </div>
+    <p class="hint">≈ beside a cycle time means Google had no cycling route, so it’s estimated from distance.</p>
+  </details>
+</main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+
+  const DEFAULTS = { maxKm: 1.6, speed: 15, parkRail: 3, parkBus: 2, busCount: 10 };
+  let settings = { ...DEFAULTS, ...store.get('bt_settings', {}) };
+  let apiKey = store.get('bt_key', '');
+  let home = store.get('bt_home', null);
+  let gps = null;
+
+  // ---------- setup & settings ----------
+  function showSetup() { $('#setup').hidden = !!apiKey; $('#keyEdit').value = apiKey; }
+  function saveKey(v) {
+    apiKey = v.trim(); store.set('bt_key', apiKey); showSetup();
+    status(apiKey ? 'Key saved.' : '');
+  }
+  $('#saveKey').onclick = () => saveKey($('#keyInput').value);
+  $('#saveKey2').onclick = () => saveKey($('#keyEdit').value);
+
+  for (const k of Object.keys(DEFAULTS)) {
+    const el = $('#' + k);
+    el.value = settings[k];
+    el.onchange = () => {
+      const n = parseFloat(el.value);
+      settings[k] = isNaN(n) ? DEFAULTS[k] : n;
+      store.set('bt_settings', settings);
+    };
+  }
+  if (home) $('#from').value = home.label;
+  renderRecent();
+  showSetup();
+
+  $('#here').onclick = () => {
+    if (!navigator.geolocation) return status('This browser can’t share your location.', true);
+    status('Getting your location…');
+    navigator.geolocation.getCurrentPosition(
+      p => { gps = { label: 'My location', lat: p.coords.latitude, lng: p.coords.longitude }; $('#from').value = gps.label; status('Using your current location.'); },
+      () => status('Location blocked. Allow location for this site, or type an address.', true),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  };
+
+  // ---------- helpers ----------
+  function status(msg, isError) { const s = $('#status'); s.textContent = msg; s.className = isError ? 'error' : ''; }
+  const wp = p => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
+  const secs = d => parseInt(d || '0', 10) || 0;
+  const fmtTime = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function haversine(a, b) {
+    const R = 6371000, r = x => x * Math.PI / 180;
+    const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  async function pool(items, n, fn) {
+    const out = new Array(items.length); let i = 0;
+    await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+      while (i < items.length) { const k = i++; try { out[k] = await fn(items[k]); } catch (e) { out[k] = { error: e }; } }
+    }));
+    return out;
+  }
+
+  async function gpost(url, body, mask) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': mask },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json().catch(() => null);
+    if (!r.ok) {
+      const msg = data?.error?.message || (Array.isArray(data) && data[0]?.error?.message) || ('Google returned error ' + r.status);
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  // ---------- Google calls ----------
+  async function findPlace(text, near) {
+    const body = { textQuery: text };
+    if (near) body.locationBias = { circle: { center: { latitude: near.lat, longitude: near.lng }, radius: 30000 } };
+    const d = await gpost('https://places.googleapis.com/v1/places:searchText', body,
+      'places.displayName,places.formattedAddress,places.location');
+    const p = d.places?.[0];
+    if (!p) throw new Error('Couldn’t find “' + text + '”. Try a fuller address or a postcode.');
+    return { label: p.displayName?.text || text, lat: p.location.latitude, lng: p.location.longitude };
+  }
+
+  async function nearby(center, types, count, radius) {
+    const d = await gpost('https://places.googleapis.com/v1/places:searchNearby', {
+      includedTypes: types, maxResultCount: count, rankPreference: 'DISTANCE',
+      locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius } }
+    }, 'places.id,places.displayName,places.location');
+    return (d.places || []).map(p => ({ id: p.id, name: p.displayName?.text || 'Stop', lat: p.location.latitude, lng: p.location.longitude }));
+  }
+
+  async function bikeDistances(o, stops) {
+    const out = stops.map(s => ({ meters: haversine(o, s) * 1.3, est: true }));
+    if (!stops.length) return out;
+    try {
+      const d = await gpost('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+        origins: [{ waypoint: wp(o) }],
+        destinations: stops.map(s => ({ waypoint: wp(s) })),
+        travelMode: 'BICYCLE'
+      }, 'originIndex,destinationIndex,distanceMeters,condition');
+      for (const e of (Array.isArray(d) ? d : [])) {
+        if (e.condition === 'ROUTE_EXISTS' && e.distanceMeters != null) out[e.destinationIndex ?? 0] = { meters: e.distanceMeters, est: false };
+      }
+    } catch (e) { console.warn('Cycling routes unavailable, using estimates.', e); }
+    return out;
+  }
+
+  async function transit(from, to, when) {
+    const d = await gpost('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      origin: wp(from), destination: wp(to), travelMode: 'TRANSIT', departureTime: when.toISOString()
+    }, 'routes.duration,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails');
+    const r = d.routes?.[0];
+    if (!r) return null;
+    return { secs: secs(r.duration), steps: (r.legs || []).flatMap(l => l.steps || []) };
+  }
+
+  // ---------- planning ----------
+  async function resolveOrigin() {
+    const txt = $('#from').value.trim();
+    if (gps && txt === gps.label) return gps;
+    if (home && txt === home.label) return home;
+    if (!txt) throw new Error('Enter where you’re starting from, or tap Use my location.');
+    const p = await findPlace(txt);
+    home = { ...p, label: txt };
+    store.set('bt_home', home);
+    return home;
+  }
+
+  function leaveTime() {
+    const now = new Date(Date.now() + 60000);
+    const v = $('#leave').value;
+    if (!v) return now;
+    const [h, m] = v.split(':').map(Number);
+    const t = new Date(); t.setHours(h, m, 0, 0);
+    if (t < now) t.setDate(t.getDate() + 1);
+    return t;
+  }
+
+  const lineOf = s => s.transitDetails?.transitLine || {};
+  function lineLabel(s) {
+    const l = lineOf(s);
+    const n = l.nameShort || l.name || 'Transit';
+    return l.vehicle?.type === 'BUS' ? 'Bus ' + n : n;
+  }
+
+  function makeOption(base, t, leave) {
+    const pre = (base.bikeMin || 0) + (base.parkMin || 0);
+    const arrive = new Date(leave.getTime() + pre * 60000 + t.secs * 1000);
+    const rides = t.steps.filter(s => s.travelMode === 'TRANSIT');
+    const key = rides.map(lineLabel).join('>') + '@' + (rides[0]?.transitDetails?.stopDetails?.departureStop?.name || '');
+    return { ...base, transit: t, arrive, totalMin: (arrive - leave) / 60000, key, hasRide: rides.length > 0 };
+  }
+
+  async function run(e) {
+    e.preventDefault();
+    if (!apiKey) { showSetup(); return status('Add your API key first.', true); }
+    const toText = $('#to').value.trim();
+    if (!toText) return status('Enter where you’re going.', true);
+
+    $('#go').disabled = true;
+    $('#results').innerHTML = '';
+    try {
+      status('Finding your start point…');
+      const o = await resolveOrigin();
+      status('Finding your destination…');
+      const dest = await findPlace(toText, o);
+      saveRecent(toText);
+      const leave = leaveTime();
+
+      status('Looking for stations and bus stops nearby…');
+      const radius = Math.min(settings.maxKm * 1000, 50000);
+      const busN = Math.max(0, Math.min(20, Math.round(settings.busCount)));
+      const [rail, bus] = await Promise.all([
+        nearby(o, ['subway_station', 'train_station', 'light_rail_station'], 20, radius),
+        busN ? nearby(o, ['bus_stop', 'bus_station'], busN, radius) : []
+      ]);
+      const stops = [
+        ...rail.map(s => ({ ...s, kind: 'rail' })),
+        ...bus.filter(b => !rail.some(r => r.id === b.id)).map(s => ({ ...s, kind: 'bus' }))
+      ];
+
+      status('Checking cycle times to ' + stops.length + ' stops…');
+      const bikes = await bikeDistances(o, stops);
+      const maxM = settings.maxKm * 1000 * 1.25;
+      const cands = stops.map((s, i) => ({ ...s, meters: bikes[i].meters, est: bikes[i].est })).filter(s => s.meters <= maxM);
+
+      status('Checking transit from ' + cands.length + ' stops…');
+      const basePromise = transit(o, dest, leave)
+        .then(t => t ? makeOption({ kind: 'walk' }, t, leave) : null)
+        .catch(err => ({ error: err }));
+      const results = await pool(cands, 6, async s => {
+        const bikeMin = s.meters / 1000 / settings.speed * 60;
+        const parkMin = s.kind === 'rail' ? settings.parkRail : settings.parkBus;
+        const dep = new Date(leave.getTime() + (bikeMin + parkMin) * 60000);
+        const t = await transit(s, dest, dep);
+        return t ? makeOption({ kind: 'bike', stop: s, bikeMin, parkMin, origin: o }, t, leave) : null;
+      });
+      const base = await basePromise;
+
+      const ok = results.filter(r => r && !r.error && r.hasRide);
+      const firstErr = results.find(r => r?.error)?.error || base?.error;
+      if (!ok.length && firstErr) throw firstErr;
+
+      ok.sort((a, b) => a.totalMin - b.totalMin);
+      const seen = new Set(), top = [];
+      for (const r of ok) { if (!seen.has(r.key)) { seen.add(r.key); top.push(r); } if (top.length >= 6) break; }
+
+      const baseOk = base && !base.error ? base : null;
+      if (!top.length && !baseOk) return status('No transit routes found. Try a different time or destination.', true);
+
+      status(top.length ? 'Fastest first. Times include cycling and parking.' : 'No cycle-to stops worked, so here’s the regular route.');
+      render(top, baseOk, dest);
+    } catch (err) {
+      let msg = err.message || String(err);
+      if (/key|permission|not been used|disabled|denied|referer|forbidden/i.test(msg)) msg += ' Check your API key in Settings, and that Routes API and Places API (New) are enabled.';
+      status(msg, true);
+    } finally {
+      $('#go').disabled = false;
+    }
+  }
+
+  // ---------- rendering ----------
+  function segments(opt) {
+    const segs = [];
+    if (opt.kind === 'bike') {
+      segs.push({ cls: 'bike', min: opt.bikeMin, text: Math.round(opt.bikeMin) });
+      if (opt.parkMin > 0) segs.push({ cls: 'park', min: opt.parkMin, text: '' });
+    }
+    const rideSegs = []; let walk = 0, sum = 0;
+    const flush = () => { if (walk > 0.5) rideSegs.push({ cls: 'walk', min: walk, text: Math.round(walk) }); walk = 0; };
+    for (const s of opt.transit.steps) {
+      const m = secs(s.staticDuration) / 60; sum += m;
+      if (s.travelMode === 'TRANSIT') {
+        flush();
+        const l = lineOf(s);
+        rideSegs.push({ cls: l.vehicle?.type === 'BUS' ? 'bus' : 'rail', min: m, text: lineLabel(s), color: l.color, textColor: l.textColor });
+      } else walk += m;
+    }
+    flush();
+    const wait = opt.transit.secs / 60 - sum;
+    if (wait >= 1) segs.push({ cls: 'wait', min: wait, text: '' });
+    return segs.concat(rideSegs);
+  }
+
+  function stepList(opt) {
+    const items = [];
+    if (opt.kind === 'bike') {
+      const s = opt.stop;
+      items.push('Cycle ' + (s.est ? '≈' : '') + Math.round(opt.bikeMin) + ' min to ' + esc(s.name) + ' (' + (s.meters / 1000).toFixed(1) + ' km)');
+    }
+    let walk = 0;
+    const flush = () => { if (walk >= 1) items.push('Walk ' + Math.round(walk) + ' min'); walk = 0; };
+    for (const s of opt.transit.steps) {
+      const m = secs(s.staticDuration) / 60;
+      if (s.travelMode === 'TRANSIT') {
+        flush();
+        const sd = s.transitDetails?.stopDetails || {};
+        const n = s.transitDetails?.stopCount;
+        const dep = sd.departureTime ? ' at ' + fmtTime(new Date(sd.departureTime)) : '';
+        items.push(esc(lineLabel(s)) + dep + ' from ' + esc(sd.departureStop?.name) + ' to ' + esc(sd.arrivalStop?.name) +
+          (n ? ' (' + n + ' stop' + (n > 1 ? 's' : '') + ')' : ''));
+      } else walk += m;
+    }
+    flush();
+    return items.map(t => '<li>' + t + '</li>').join('');
+  }
+
+  const mapsLink = (a, b, mode) =>
+    'https://www.google.com/maps/dir/?api=1&origin=' + a.lat + ',' + a.lng + '&destination=' + b.lat + ',' + b.lng + '&travelmode=' + mode;
+
+  function card(opt, dest, base, best) {
+    const segs = segments(opt);
+    const strip = segs.map(s => {
+      const style = 'flex-grow:' + Math.max(s.min, 0.5).toFixed(2) +
+        (s.color ? ';background:' + esc(s.color) + ';color:' + esc(s.textColor || '#fff') : '');
+      const label = s.min >= 4 ? esc(s.text) : '';
+      return '<div class="seg ' + s.cls + '" style="' + style + '">' + label + '</div>';
+    }).join('');
+
+    let tag = '';
+    if (opt.kind === 'bike' && base) {
+      const diff = Math.round(base.totalMin - opt.totalMin);
+      tag = diff >= 1 ? '<span class="tag good">' + diff + ' min faster than walking from home</span>'
+          : diff <= -1 ? '<span class="tag">' + (-diff) + ' min slower than walking from home</span>' : '';
+    }
+    const title = opt.kind === 'bike'
+      ? '<p class="start">Cycle to ' + esc(opt.stop.name) + '</p>'
+      : '<p class="start">Walk from home (no bike)</p>';
+    const links = opt.kind === 'bike'
+      ? '<a href="' + mapsLink(opt.origin, opt.stop, 'bicycling') + '" target="_blank" rel="noopener">Cycle route</a>' +
+        '<a href="' + mapsLink(opt.stop, dest, 'transit') + '" target="_blank" rel="noopener">Transit from there</a>'
+      : '';
+
+    return '<article class="result' + (best ? ' best' : '') + (opt.kind === 'walk' ? ' base' : '') + '">' +
+      '<div class="headline"><span class="mins">' + Math.round(opt.totalMin) + ' <small>min</small></span>' +
+      '<span class="arrive">Arrive ' + fmtTime(opt.arrive) + '</span></div>' +
+      tag + title +
+      '<div class="strip" aria-hidden="true">' + strip + '</div>' +
+      '<ol class="steps">' + stepList(opt) + '</ol>' +
+      (links ? '<div class="links">' + links + '</div>' : '') +
+      '</article>';
+  }
+
+  function render(top, base, dest) {
+    $('#results').innerHTML =
+      top.map((o, i) => card(o, dest, base, i === 0)).join('') +
+      (base ? card(base, dest, null, false) : '');
+  }
+
+  // ---------- recent destinations ----------
+  function saveRecent(t) {
+    const r = store.get('bt_recent', []).filter(x => x.toLowerCase() !== t.toLowerCase());
+    r.unshift(t); store.set('bt_recent', r.slice(0, 8)); renderRecent();
+  }
+  function renderRecent() {
+    $('#recent').innerHTML = store.get('bt_recent', []).map(t => '<option value="' + esc(t) + '">').join('');
+  }
+
+  $('#trip').addEventListener('submit', run);
+})();
+</script>
+</body>
+</html>
