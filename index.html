@@ -348,6 +348,25 @@
     return l.vehicle?.type === 'BUS' ? 'Bus ' + n : n;
   }
 
+  // Where the first ride boards, and how long you'd walk to reach it.
+  function boardingStop(t) {
+    let walk = 0;
+    for (const s of t.steps) {
+      if (s.travelMode === 'TRANSIT') {
+        const st = s.transitDetails?.stopDetails?.departureStop;
+        const ll = st?.location?.latLng;
+        if (!ll) return null;
+        return {
+          id: 'board:' + ll.latitude + ',' + ll.longitude,
+          name: st.name || 'Stop', lat: ll.latitude, lng: ll.longitude,
+          kind: lineOf(s).vehicle?.type === 'BUS' ? 'bus' : 'rail', walkMin: walk
+        };
+      }
+      walk += secs(s.staticDuration) / 60;
+    }
+    return null;
+  }
+
   function makeOption(base, t, leave) {
     const pre = (base.bikeMin || 0) + (base.parkMin || 0);
     const arrive = new Date(leave.getTime() + pre * 60000 + t.secs * 1000);
@@ -393,16 +412,37 @@
       const basePromise = transit(o, dest, leave)
         .then(t => t ? makeOption({ kind: 'walk' }, t, leave) : null)
         .catch(err => ({ error: err }));
-      const results = await pool(cands, 6, async s => {
+      const planFrom = async s => {
         const bikeMin = s.meters / 1000 / settings.speed * 60;
         const parkMin = s.kind === 'rail' ? settings.parkRail : settings.parkBus;
         const dep = new Date(leave.getTime() + (bikeMin + parkMin) * 60000);
         const t = await transit(s, dest, dep);
         return t ? makeOption({ kind: 'bike', stop: s, bikeMin, parkMin, origin: o }, t, leave) : null;
-      });
+      };
+      const results = await pool(cands, 6, planFrom);
+
+      // Second pass: if a route starts with a walk to a different stop,
+      // try cycling straight to the stop where you actually board.
+      const boardMap = new Map();
+      for (const r of results) {
+        if (!r || r.error || !r.hasRide) continue;
+        const b = boardingStop(r.transit);
+        if (b && b.walkMin >= 2) {
+          const k = b.lat.toFixed(4) + ',' + b.lng.toFixed(4);
+          if (!boardMap.has(k)) boardMap.set(k, b);
+        }
+      }
+      let extra = [];
+      const boards = [...boardMap.values()];
+      if (boards.length) {
+        status('Checking cycling straight to ' + boards.length + ' boarding points…');
+        const bd = await bikeDistances(o, boards);
+        const bc = boards.map((s, i) => ({ ...s, meters: bd[i].meters, est: bd[i].est })).filter(s => s.meters <= maxM);
+        extra = await pool(bc, 6, planFrom);
+      }
       const base = await basePromise;
 
-      const ok = results.filter(r => r && !r.error && r.hasRide);
+      const ok = results.concat(extra).filter(r => r && !r.error && r.hasRide);
       const firstErr = results.find(r => r?.error)?.error || base?.error;
       if (!ok.length && firstErr) throw firstErr;
 
