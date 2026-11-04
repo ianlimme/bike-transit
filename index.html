@@ -124,6 +124,8 @@
   details { margin-top: 32px; border-top: 1.5px solid var(--line); padding-top: 12px; }
   summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .jswarn { background: var(--error); color: #fff; border-radius: 12px; padding: 12px 14px; margin: 0 0 18px; font-weight: 700; }
+  .jswarn[hidden] { display: none; }
   #setup { background: var(--surface); border: 2px solid var(--bike); border-radius: 14px; padding: 16px; margin-bottom: 20px; }
   #setup h2 { margin: 0 0 6px; font-size: 20px; }
   #setup p { margin: 0 0 10px; color: var(--muted); font-size: 15px; }
@@ -140,6 +142,14 @@
     Bike + transit
   </p>
 
+  <p id="jswarn" class="jswarn">The page’s code isn’t running, so buttons won’t work. Open it from your github.io address in Safari or Chrome (not a file preview), then reload.</p>
+  <script>
+    window.addEventListener('error', function (e) {
+      var w = document.getElementById('jswarn');
+      if (w) { w.hidden = false; w.textContent = 'Page error: ' + (e.message || 'unknown') + ' (line ' + (e.lineno || '?') + '). Send this to Claude.'; }
+    });
+  </script>
+
   <section id="setup" hidden>
     <h2>Add your Google API key</h2>
     <p>It stays on this phone only. You can change it later in Settings.</p>
@@ -149,7 +159,7 @@
     </div>
   </section>
 
-  <form id="trip" autocomplete="off">
+  <form id="trip" autocomplete="off" action="javascript:void(0)">
     <label for="to" class="hero-label">Where to?</label>
     <input type="text" id="to" list="recent" placeholder="Place, address or postcode">
     <datalist id="recent"></datalist>
@@ -213,10 +223,13 @@
   function showSetup() { $('#setup').hidden = !!apiKey; $('#keyEdit').value = apiKey; }
   function saveKey(v) {
     apiKey = v.trim(); store.set('bt_key', apiKey); showSetup();
+    if (apiKey && store.get('bt_key', '') !== apiKey) return status('Key works for now, but this browser won’t store it. Turn off Private Browsing, then save again.', true);
     status(apiKey ? 'Key saved.' : '');
   }
   $('#saveKey').onclick = () => saveKey($('#keyInput').value);
   $('#saveKey2').onclick = () => saveKey($('#keyEdit').value);
+  $('#keyInput').onchange = () => saveKey($('#keyInput').value);
+  $('#keyEdit').onchange = () => saveKey($('#keyEdit').value);
 
   for (const k of Object.keys(DEFAULTS)) {
     const el = $('#' + k);
@@ -576,6 +589,7 @@
   }
 
   $('#trip').addEventListener('submit', run);
+  $('#jswarn').hidden = true;
 })();
 </script>
 </body>
