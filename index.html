@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bike+Transit">
 <title>Bike + transit</title>
+<script src="config.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
@@ -44,7 +45,7 @@
       --error: #FF8A80;
     }
   }
-  *, *::before, *::after { box-sizing: inherit; }
+  *, *::before, *::after { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
@@ -62,6 +63,11 @@
   input, button { font: inherit; color: inherit; }
   input[type=text], input[type=time], input[type=number], input[type=password] {
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    display: block;
+    -webkit-appearance: none;
+    appearance: none;
     background: var(--surface);
     border: 1.5px solid var(--line);
     border-radius: 10px;
@@ -123,7 +129,9 @@
 
   details { margin-top: 32px; border-top: 1.5px solid var(--line); padding-top: 12px; }
   summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 12px; }
+  .update { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface); border: 2px solid var(--bike); border-radius: 12px; padding: 8px 8px 8px 14px; margin: 0 0 18px; font-weight: 700; }
+  .update[hidden] { display: none; }
   .jswarn { background: var(--error); color: #fff; border-radius: 12px; padding: 12px 14px; margin: 0 0 18px; font-weight: 700; }
   .jswarn[hidden] { display: none; }
   #setup { background: var(--surface); border: 2px solid var(--bike); border-radius: 14px; padding: 16px; margin-bottom: 20px; }
@@ -149,6 +157,11 @@
       if (w) { w.hidden = false; w.textContent = 'Page error: ' + (e.message || 'unknown') + ' (line ' + (e.lineno || '?') + '). Send this to Claude.'; }
     });
   </script>
+
+  <div id="update" class="update" hidden>
+    <span>A new version is ready.</span>
+    <button type="button" class="ghost" id="doUpdate">Update</button>
+  </div>
 
   <section id="setup" hidden>
     <h2>Add your Google API key</h2>
@@ -201,6 +214,9 @@
         <button type="button" class="ghost" id="saveKey2">Save</button>
       </div>
     </div>
+    <p class="hint" id="keyNote"></p>
+    <button type="button" class="ghost" id="reloadApp" style="margin-top:14px;width:100%">Reload app</button>
+    <p class="hint" id="ver"></p>
     <p class="hint">≈ beside a cycle time means Google had no cycling route, so it’s estimated from distance.</p>
   </details>
 </main>
@@ -215,12 +231,17 @@
 
   const DEFAULTS = { maxKm: 1.6, speed: 15, parkRail: 3, parkBus: 2, busCount: 10 };
   let settings = { ...DEFAULTS, ...store.get('bt_settings', {}) };
-  let apiKey = store.get('bt_key', '');
+  const APP_VERSION = '2026-11-05.6';
+  const fileKey = (window.BIKE_KEY || '').trim();
+  let apiKey = fileKey || store.get('bt_key', '');
   let home = store.get('bt_home', null);
   let gps = null;
 
   // ---------- setup & settings ----------
-  function showSetup() { $('#setup').hidden = !!apiKey; $('#keyEdit').value = apiKey; }
+  function showSetup() {
+    $('#setup').hidden = !!apiKey; $('#keyEdit').value = apiKey;
+    $('#keyNote').textContent = fileKey ? 'Using the key from config.js.' : '';
+  }
   function saveKey(v) {
     apiKey = v.trim(); store.set('bt_key', apiKey); showSetup();
     if (apiKey && store.get('bt_key', '') !== apiKey) return status('Key works for now, but this browser won’t store it. Turn off Private Browsing, then save again.', true);
@@ -240,9 +261,6 @@
       store.set('bt_settings', settings);
     };
   }
-  if (home) $('#from').value = home.label;
-  renderRecent();
-  showSetup();
 
   $('#here').onclick = () => {
     if (!navigator.geolocation) return status('This browser can’t share your location.', true);
@@ -301,7 +319,7 @@
 
   // ---------- Google calls ----------
   async function findPlace(text, near) {
-    const body = { textQuery: text };
+    const body = { textQuery: /^\d{6}$/.test(text) ? 'Singapore ' + text : text };
     if (near) body.locationBias = { circle: { center: { latitude: near.lat, longitude: near.lng }, radius: 30000 } };
     const d = await gpost('https://places.googleapis.com/v1/places:searchText', body,
       'places.displayName,places.formattedAddress,places.location');
@@ -588,6 +606,24 @@
     $('#recent').innerHTML = store.get('bt_recent', []).map(t => '<option value="' + esc(t) + '">').join('');
   }
 
+  // ---------- updates (home-screen apps have no refresh button) ----------
+  const freshReload = () => { location.replace(location.pathname + '?v=' + Date.now()); };
+  async function checkUpdate() {
+    try {
+      const r = await fetch(location.pathname + '?check=' + Date.now(), { cache: 'no-store' });
+      const m = (await r.text()).match(/APP_VERSION = '([^']+)'/);
+      if (m && m[1] !== APP_VERSION) $('#update').hidden = false;
+    } catch {}
+  }
+  $('#doUpdate').onclick = freshReload;
+  $('#reloadApp').onclick = freshReload;
+  $('#ver').textContent = 'Version ' + APP_VERSION;
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
+  checkUpdate();
+
+  if (home) $('#from').value = home.label;
+  renderRecent();
+  showSetup();
   $('#trip').addEventListener('submit', run);
   $('#jswarn').hidden = true;
 })();
