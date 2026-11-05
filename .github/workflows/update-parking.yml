@@ -11,6 +11,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -18,8 +19,9 @@ jobs:
         env:
           LTA_ACCOUNT_KEY: ${{ secrets.LTA_ACCOUNT_KEY }}
         run: |
-          python3 - <<'PY'
+          python3 -u - <<'PY'
           import json, os, sys, time, datetime, urllib.request, urllib.parse
+          from concurrent.futures import ThreadPoolExecutor
 
           KEY = os.environ.get("LTA_ACCOUNT_KEY", "").strip()
           if not KEY:
@@ -30,35 +32,43 @@ jobs:
               q = {"Lat": f"{lat:.5f}", "Long": f"{lng:.5f}", "Dist": "1.5"}
               url = URL + "?" + urllib.parse.urlencode(q) + (f"&$skip={skip}" if skip else "")
               req = urllib.request.Request(url, headers={"AccountKey": KEY, "accept": "application/json"})
-              for attempt in range(4):
+              for attempt in range(3):
                   try:
-                      with urllib.request.urlopen(req, timeout=30) as r:
+                      with urllib.request.urlopen(req, timeout=15) as r:
                           return json.load(r).get("value", [])
                   except Exception as e:
-                      if attempt == 3:
+                      if attempt == 2:
                           raise
-                      time.sleep(3 * (attempt + 1))
+                      time.sleep(2 * (attempt + 1))
+
+          def point(pt):
+              lat, lng = pt
+              found, skip = [], 0
+              while True:
+                  rows = get(lat, lng, skip)
+                  found.extend(rows)
+                  if len(rows) < 500:
+                      return found
+                  skip += 500
 
           # Cover Singapore with overlapping 1.5 km circles on a ~2 km grid.
           step = 0.018
           lats = [1.20 + i * step for i in range(int((1.48 - 1.20) / step) + 2)]
           lngs = [103.60 + j * step for j in range(int((104.05 - 103.60) / step) + 2)]
-          seen = {}
-          for lat in lats:
-              for lng in lngs:
-                  skip = 0
-                  while True:
-                      rows = get(lat, lng, skip)
-                      for r in rows:
-                          try:
-                              la, lo = float(r["Latitude"]), float(r["Longitude"])
-                          except (KeyError, TypeError, ValueError):
-                              continue
-                          seen[(round(la, 6), round(lo, 6), r.get("Description", ""))] = r
-                      if len(rows) < 500:
-                          break
-                      skip += 500
-                  time.sleep(0.15)
+          points = [(la, lo) for la in lats for lo in lngs]
+          print(f"Checking {len(points)} grid points, 6 at a time…")
+          seen, done, started = {}, 0, time.time()
+          with ThreadPoolExecutor(max_workers=6) as ex:
+              for rows in ex.map(point, points):
+                  done += 1
+                  for r in rows:
+                      try:
+                          la, lo = float(r["Latitude"]), float(r["Longitude"])
+                      except (KeyError, TypeError, ValueError):
+                          continue
+                      seen[(round(la, 6), round(lo, 6), r.get("Description", ""))] = r
+                  if done % 25 == 0 or done == len(points):
+                      print(f"  {done}/{len(points)} points, {len(seen)} locations, {time.time() - started:.0f}s")
 
           if len(seen) < 500:
               sys.exit(f"Only {len(seen)} locations found, so something is wrong. Keeping the old file.")
