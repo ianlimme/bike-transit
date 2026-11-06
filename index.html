@@ -22,6 +22,7 @@
     --bike: #1B998B;
     --rail: #D99A00;
     --bus: #3D5A80;
+    --share: #7B5CD6;
     --walk: #A7B1AE;
     --wait: #DDE4E1;
     --error: #B42318;
@@ -40,6 +41,7 @@
       --bike: #34C3B1;
       --rail: #F0B429;
       --bus: #7FA7D9;
+      --share: #B39DFF;
       --walk: #5B6B68;
       --wait: #22343A;
       --error: #FF8A80;
@@ -121,6 +123,15 @@
   .seg.walk { background: var(--walk); }
   .seg.rail { background: var(--rail); }
   .seg.bus { background: var(--bus); }
+  .seg.share { background: var(--share); }
+  .modes { border: 0; padding: 0; margin: 16px 0 0; min-width: 0; }
+  .modes legend { font-size: 15px; color: var(--muted); margin-bottom: 6px; padding: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { position: relative; }
+  .chip input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+  .chip span { display: inline-flex; align-items: center; min-height: 42px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); font-size: 15px; }
+  .chip input:checked + span { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+  .chip input:focus-visible + span { outline: 3px solid var(--bike); outline-offset: 2px; }
 
   ol.steps { margin: 0; padding-left: 20px; font-size: 15px; }
   ol.steps li { margin: 2px 0; }
@@ -191,6 +202,24 @@
       <p class="hint">Leave blank to go now.</p>
     </div>
 
+    <fieldset class="modes">
+      <legend>Start of trip</legend>
+      <div class="chips">
+        <label class="chip"><input type="checkbox" name="start" value="walk"><span>Walk</span></label>
+        <label class="chip"><input type="checkbox" name="start" value="own"><span>Own bike</span></label>
+        <label class="chip"><input type="checkbox" name="start" value="share"><span>Share bike</span></label>
+      </div>
+    </fieldset>
+    <fieldset class="modes">
+      <legend>End of trip</legend>
+      <div class="chips">
+        <label class="chip"><input type="checkbox" name="end" value="walk"><span>Walk</span></label>
+        <label class="chip"><input type="checkbox" name="end" value="share"><span>Share bike</span></label>
+        <label class="chip"><input type="checkbox" name="end" value="fold"><span>Own foldable bike</span></label>
+      </div>
+      <p class="hint">Pick more than one to compare them. A foldable at the end means you take your own bike on the train.</p>
+    </fieldset>
+
     <button type="submit" class="primary" id="go">Find routes</button>
   </form>
 
@@ -204,6 +233,9 @@
       <div class="field"><label for="speed">Cycle speed (km/h)</label><input type="number" id="speed" min="5" max="35" step="1"></div>
       <div class="field"><label for="parkRail">Parking at stations (min)</label><input type="number" id="parkRail" min="0" max="15" step="1"></div>
       <div class="field"><label for="parkBus">Parking at bus stops (min)</label><input type="number" id="parkBus" min="0" max="15" step="1"></div>
+      <div class="field"><label for="walkSpeed">Walk speed (km/h)</label><input type="number" id="walkSpeed" min="2" max="8" step="0.5"></div>
+      <div class="field"><label for="shareMin">Share bike unlock + lock (min)</label><input type="number" id="shareMin" min="0" max="10" step="1"></div>
+      <div class="field"><label for="shareWalkM">Max walk to a share bike (m)</label><input type="number" id="shareWalkM" min="50" max="1500" step="50"></div>
       <div class="field"><label for="busCount">Bus stops to check</label><input type="number" id="busCount" min="0" max="20" step="1"></div>
     </div>
     <p class="hint">Checking more bus stops finds more options but uses more of your free Google allowance.</p>
@@ -217,6 +249,7 @@
     <p class="hint" id="keyNote"></p>
     <button type="button" class="ghost" id="reloadApp" style="margin-top:14px;width:100%">Reload app</button>
     <p class="hint" id="ver"></p>
+    <p class="hint" id="parkInfo"></p>
     <p class="hint">≈ beside a cycle time means Google had no cycling route, so it’s estimated from distance.</p>
   </details>
 </main>
@@ -224,18 +257,21 @@
 <script>
 (() => {
   const $ = s => document.querySelector(s);
+  const $$ = s => [...document.querySelectorAll(s)];
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
 
-  const DEFAULTS = { maxKm: 1.6, speed: 15, parkRail: 3, parkBus: 2, busCount: 10 };
+  const APP_VERSION = '2026-11-05.7';
+  const NUM_DEFAULTS = { maxKm: 1.6, speed: 15, walkSpeed: 5, parkRail: 3, parkBus: 2, shareMin: 2, shareWalkM: 400, busCount: 8 };
+  const DEFAULTS = { ...NUM_DEFAULTS, start: ['walk', 'own'], end: ['walk', 'share'] };
   let settings = { ...DEFAULTS, ...store.get('bt_settings', {}) };
-  const APP_VERSION = '2026-11-05.6';
   const fileKey = (window.BIKE_KEY || '').trim();
   let apiKey = fileKey || store.get('bt_key', '');
   let home = store.get('bt_home', null);
   let gps = null;
+  const saveSettings = () => store.set('bt_settings', settings);
 
   // ---------- setup & settings ----------
   function showSetup() {
@@ -252,21 +288,27 @@
   $('#keyInput').onchange = () => saveKey($('#keyInput').value);
   $('#keyEdit').onchange = () => saveKey($('#keyEdit').value);
 
-  for (const k of Object.keys(DEFAULTS)) {
+  for (const k of Object.keys(NUM_DEFAULTS)) {
     const el = $('#' + k);
     el.value = settings[k];
-    el.onchange = () => {
-      const n = parseFloat(el.value);
-      settings[k] = isNaN(n) ? DEFAULTS[k] : n;
-      store.set('bt_settings', settings);
-    };
+    el.onchange = () => { const n = parseFloat(el.value); settings[k] = isNaN(n) ? NUM_DEFAULTS[k] : n; saveSettings(); };
+  }
+  for (const group of ['start', 'end']) {
+    for (const cb of $$('input[name=' + group + ']')) {
+      cb.checked = settings[group].includes(cb.value);
+      cb.onchange = () => {
+        let v = $$('input[name=' + group + ']').filter(c => c.checked).map(c => c.value);
+        if (!v.length) { cb.checked = true; v = [cb.value]; }
+        settings[group] = v; saveSettings();
+      };
+    }
   }
 
   $('#here').onclick = () => {
     if (!navigator.geolocation) return status('This browser can’t share your location.', true);
     status('Getting your location…');
     navigator.geolocation.getCurrentPosition(
-      p => { gps = { label: 'My location', lat: p.coords.latitude, lng: p.coords.longitude }; $('#from').value = gps.label; status('Using your current location.'); },
+      p => { gps = { label: 'My location', name: 'your location', lat: p.coords.latitude, lng: p.coords.longitude }; $('#from').value = gps.label; status('Using your current location.'); },
       () => status('Location blocked. Allow location for this site, or type an address.', true),
       { enableHighAccuracy: true, timeout: 15000 }
     );
@@ -280,6 +322,8 @@
   const wp = p => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
   const secs = d => parseInt(d || '0', 10) || 0;
   const fmtTime = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const km = m => (m / 1000).toFixed(1);
+  const rnd = m => Math.max(1, Math.round(m));
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function haversine(a, b) {
     const R = 6371000, r = x => x * Math.PI / 180;
@@ -287,6 +331,9 @@
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(h));
   }
+  const walkMinOf = (a, b) => haversine(a, b) * 1.3 / 1000 / settings.walkSpeed * 60;
+  const bikeMinOf = m => m / 1000 / settings.speed * 60;
+  const maxBikeM = () => settings.maxKm * 1000 * 1.25;
   async function pool(items, n, fn) {
     const out = new Array(items.length); let i = 0;
     await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
@@ -301,11 +348,10 @@
     let r;
     try {
       r = await fetch(url, {
-      signal: ctrl.signal,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': mask },
-      body: JSON.stringify(body)
-    });
+        signal: ctrl.signal, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': mask },
+        body: JSON.stringify(body)
+      });
     } catch (e) {
       throw new Error(e.name === 'AbortError' ? 'Google didn’t respond within 20 seconds. Check your connection and try again.' : 'Couldn’t reach Google (' + e.message + '). Check your connection.');
     } finally { clearTimeout(timer); }
@@ -321,11 +367,10 @@
   async function findPlace(text, near) {
     const body = { textQuery: /^\d{6}$/.test(text) ? 'Singapore ' + text : text };
     if (near) body.locationBias = { circle: { center: { latitude: near.lat, longitude: near.lng }, radius: 30000 } };
-    const d = await gpost('https://places.googleapis.com/v1/places:searchText', body,
-      'places.displayName,places.formattedAddress,places.location');
+    const d = await gpost('https://places.googleapis.com/v1/places:searchText', body, 'places.displayName,places.formattedAddress,places.location');
     const p = d.places?.[0];
     if (!p) throw new Error('Couldn’t find “' + text + '”. Try a fuller address or a postcode.');
-    return { label: p.displayName?.text || text, lat: p.location.latitude, lng: p.location.longitude };
+    return { label: p.displayName?.text || text, name: p.displayName?.text || text, lat: p.location.latitude, lng: p.location.longitude };
   }
 
   async function nearby(center, types, count, radius) {
@@ -336,20 +381,33 @@
     return (d.places || []).map(p => ({ id: p.id, name: p.displayName?.text || 'Stop', lat: p.location.latitude, lng: p.location.longitude }));
   }
 
-  async function bikeDistances(o, stops) {
-    const out = stops.map(s => ({ meters: haversine(o, s) * 1.3, est: true }));
-    if (!stops.length) return out;
+  async function findStops(c, busN) {
+    const radius = Math.min(settings.maxKm * 1000, 50000);
+    const [rail, bus] = await Promise.all([
+      nearby(c, ['subway_station', 'train_station', 'light_rail_station'], 20, radius),
+      busN ? nearby(c, ['bus_stop', 'bus_station'], busN, radius) : []
+    ]);
+    return [
+      ...rail.map(s => ({ ...s, kind: 'rail' })),
+      ...bus.filter(b => !rail.some(r => r.id === b.id)).map(s => ({ ...s, kind: 'bus' }))
+    ];
+  }
+
+  // Cycling distances between every origin and destination (falls back to a straight-line estimate).
+  async function bikeMatrix(origins, dests) {
+    const m = origins.map(o => dests.map(d => ({ meters: haversine(o, d) * 1.3, est: true })));
+    if (!origins.length || !dests.length) return m;
     try {
       const d = await gpost('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
-        origins: [{ waypoint: wp(o) }],
-        destinations: stops.map(s => ({ waypoint: wp(s) })),
+        origins: origins.map(o => ({ waypoint: wp(o) })),
+        destinations: dests.map(x => ({ waypoint: wp(x) })),
         travelMode: 'BICYCLE'
       }, 'originIndex,destinationIndex,distanceMeters,condition');
       for (const e of (Array.isArray(d) ? d : [])) {
-        if (e.condition === 'ROUTE_EXISTS' && e.distanceMeters != null) out[e.destinationIndex ?? 0] = { meters: e.distanceMeters, est: false };
+        if (e.condition === 'ROUTE_EXISTS' && e.distanceMeters != null) m[e.originIndex ?? 0][e.destinationIndex ?? 0] = { meters: e.distanceMeters, est: false };
       }
     } catch (e) { console.warn('Cycling routes unavailable, using estimates.', e); }
-    return out;
+    return m;
   }
 
   async function transit(from, to, when) {
@@ -361,26 +419,110 @@
     return { secs: secs(r.duration), steps: (r.legs || []).flatMap(l => l.steps || []) };
   }
 
-  // ---------- planning ----------
-  async function resolveOrigin() {
-    const txt = $('#from').value.trim();
-    if (gps && txt === gps.label) return gps;
-    if (home && txt === home.label) return home;
-    if (!txt) throw new Error('Enter where you’re starting from, or tap Use my location.');
-    const p = await findPlace(txt);
-    home = { ...p, label: txt };
-    store.set('bt_home', home);
-    return home;
+  // ---------- LTA bicycle parking (parking.json, updated monthly by GitHub) ----------
+  let parking = null;
+  const CELL = 0.005;
+  async function loadParking() {
+    if (parking) return parking;
+    try {
+      const r = await fetch('parking.json', { cache: 'no-cache' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const grid = new Map();
+      for (const [lat, lng, name, rackType, lots, sheltered, shared] of d.rows) {
+        const k = Math.floor(lat / CELL) + ':' + Math.floor(lng / CELL);
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push({ lat, lng, name, rackType, lots, sheltered: !!sheltered, shared: !!shared });
+      }
+      parking = { grid, updated: d.updated, count: d.rows.length };
+      $('#parkInfo').textContent = 'Bike parking data: LTA DataMall, updated ' + d.updated + ' (' + d.rows.length + ' locations).';
+    } catch (e) {
+      parking = { grid: new Map(), updated: null, count: 0 };
+      $('#parkInfo').textContent = 'Bike parking data not found (parking.json). Share-bike options are off until it’s there.';
+    }
+    return parking;
+  }
+  function nearestParking(pt, maxM, sharedOnly) {
+    if (!parking || !parking.count) return null;
+    const r = Math.ceil(maxM / 550), ci = Math.floor(pt.lat / CELL), cj = Math.floor(pt.lng / CELL);
+    let best = null, bd = Infinity;
+    for (let i = ci - r; i <= ci + r; i++) for (let j = cj - r; j <= cj + r; j++) {
+      for (const p of (parking.grid.get(i + ':' + j) || [])) {
+        if (sharedOnly && !p.shared) continue;
+        const d = haversine(pt, p);
+        if (d < bd && d <= maxM) { bd = d; best = p; }
+      }
+    }
+    return best ? { ...best, dist: bd } : null;
   }
 
-  function leaveTime() {
-    const now = new Date(Date.now() + 60000);
-    const v = $('#leave').value;
-    if (!v) return now;
-    const [h, m] = v.split(':').map(Number);
-    const t = new Date(); t.setHours(h, m, 0, 0);
-    if (t < now) t.setDate(t.getDate() + 1);
-    return t;
+  // ---------- journey pieces ----------
+  const mapsLink = (a, b, mode, label) => ({ label, href:
+    'https://www.google.com/maps/dir/?api=1&origin=' + a.lat + ',' + a.lng + '&destination=' + b.lat + ',' + b.lng + '&travelmode=' + mode });
+  const spotName = p => esc(p.name || 'bike parking');
+
+  // How you get from the start to where transit begins.
+  function accessWalk(o) { return { mode: 'walk', place: o, preMin: 0, segs: [], lines: [], links: [] }; }
+
+  function accessOwn(o, stop, b, fold) {
+    const bike = bikeMinOf(b.meters);
+    const segs = [{ cls: 'bike', min: bike, text: Math.round(bike) }];
+    const lines = ['Cycle ' + (b.est ? '≈' : '') + rnd(bike) + ' min to ' + esc(stop.name) + ' (' + km(b.meters) + ' km)'];
+    let pre = bike;
+    if (fold) {
+      segs.push({ cls: 'park', min: 1 }); pre += 1;
+      lines.push('Fold your bike and take it with you');
+    } else {
+      const park = stop.kind === 'rail' ? settings.parkRail : settings.parkBus;
+      const rack = nearestParking(stop, 200, false);
+      let extra = 0;
+      if (rack) {
+        extra = walkMinOf(rack, stop);
+        lines.push('Park at ' + spotName(rack) + ' (' + (rack.lots || '?') + ' lots' + (rack.sheltered ? ', sheltered' : '') + ')' +
+          (extra >= 1 ? ', then walk ' + Math.round(extra) + ' min' : ''));
+      } else if (parking && parking.count) {
+        lines.push('No mapped bike racks within 200 m, so allow time to find a spot');
+      }
+      segs.push({ cls: 'park', min: park + extra }); pre += park + extra;
+    }
+    return { mode: fold ? 'fold' : 'own', place: stop, bike: b, preMin: pre, segs, lines, links: [mapsLink(o, stop, 'bicycling', 'Cycle route')] };
+  }
+
+  function accessShare(o, stop, spotA, spotB, b) {
+    const w1 = walkMinOf(o, spotA), w2 = walkMinOf(spotB, stop), bike = bikeMinOf(b.meters), h = settings.shareMin / 2;
+    const lines = [];
+    lines.push((w1 >= 1 ? 'Walk ' + Math.round(w1) + ' min to ' : 'Pick up a share bike at ') + (w1 >= 1 ? 'share-bike parking at ' : '') + spotName(spotA));
+    lines.push('Ride ' + (b.est ? '≈' : '') + rnd(bike) + ' min (' + km(b.meters) + ' km) and park at ' + spotName(spotB));
+    if (w2 >= 1) lines.push('Walk ' + Math.round(w2) + ' min to ' + esc(stop.name));
+    return {
+      mode: 'share', place: stop, preMin: w1 + h + bike + h + w2,
+      segs: [{ cls: 'walk', min: w1 }, { cls: 'park', min: h }, { cls: 'share', min: bike, text: Math.round(bike) }, { cls: 'park', min: h }, { cls: 'walk', min: w2 }],
+      lines, links: [mapsLink(spotA, spotB, 'bicycling', 'Share-bike route')]
+    };
+  }
+
+  // How you get from where transit ends to the destination.
+  function egressShare(A, dest, spotC, spotD, b) {
+    const w1 = walkMinOf(A, spotC), w2 = walkMinOf(spotD, dest), bike = bikeMinOf(b.meters), h = settings.shareMin / 2;
+    const lines = [];
+    lines.push((w1 >= 1 ? 'Walk ' + Math.round(w1) + ' min to ' + spotName(spotC) + ' and unlock a share bike' : 'Unlock a share bike at ' + spotName(spotC)));
+    lines.push('Ride ' + (b.est ? '≈' : '') + rnd(bike) + ' min (' + km(b.meters) + ' km) and park at ' + spotName(spotD));
+    if (w2 >= 1) lines.push('Walk ' + Math.round(w2) + ' min to your destination');
+    return {
+      mode: 'share', place: A, postMin: w1 + h + bike + h + w2,
+      segs: [{ cls: 'walk', min: w1 }, { cls: 'park', min: h }, { cls: 'share', min: bike, text: Math.round(bike) }, { cls: 'park', min: h }, { cls: 'walk', min: w2 }],
+      lines, links: [mapsLink(spotC, spotD, 'bicycling', 'Share-bike route')]
+    };
+  }
+
+  function egressOwn(A, dest, b) {
+    const bike = bikeMinOf(b.meters);
+    return {
+      mode: 'fold', place: A, postMin: 1 + bike,
+      segs: [{ cls: 'park', min: 1 }, { cls: 'bike', min: bike, text: Math.round(bike) }],
+      lines: ['Unfold your bike and cycle ' + (b.est ? '≈' : '') + rnd(bike) + ' min (' + km(b.meters) + ' km) to your destination'],
+      links: [mapsLink(A, dest, 'bicycling', 'Cycle route')]
+    };
   }
 
   const lineOf = s => s.transitDetails?.transitLine || {};
@@ -398,23 +540,45 @@
         const st = s.transitDetails?.stopDetails?.departureStop;
         const ll = st?.location?.latLng;
         if (!ll) return null;
-        return {
-          id: 'board:' + ll.latitude + ',' + ll.longitude,
-          name: st.name || 'Stop', lat: ll.latitude, lng: ll.longitude,
-          kind: lineOf(s).vehicle?.type === 'BUS' ? 'bus' : 'rail', walkMin: walk
-        };
+        return { id: 'board:' + ll.latitude + ',' + ll.longitude, name: st.name || 'Stop', lat: ll.latitude, lng: ll.longitude,
+          kind: lineOf(s).vehicle?.type === 'BUS' ? 'bus' : 'rail', walkMin: walk };
       }
       walk += secs(s.staticDuration) / 60;
     }
     return null;
   }
 
-  function makeOption(base, t, leave) {
-    const pre = (base.bikeMin || 0) + (base.parkMin || 0);
-    const arrive = new Date(leave.getTime() + pre * 60000 + t.secs * 1000);
+  function buildOption(acc, t, eg, leave) {
+    const arrive = new Date(leave.getTime() + (acc.preMin + t.secs / 60 + (eg ? eg.postMin : 0)) * 60000);
     const rides = t.steps.filter(s => s.travelMode === 'TRANSIT');
-    const key = rides.map(lineLabel).join('>') + '@' + (rides[0]?.transitDetails?.stopDetails?.departureStop?.name || '');
-    return { ...base, transit: t, arrive, totalMin: (arrive - leave) / 60000, key, hasRide: rides.length > 0 };
+    const first = rides[0]?.transitDetails?.stopDetails?.departureStop?.name || '';
+    const last = rides[rides.length - 1]?.transitDetails?.stopDetails?.arrivalStop?.name || '';
+    const key = acc.mode + '|' + (eg ? eg.mode : 'walk') + '|' + rides.map(lineLabel).join('>') + '@' + first + '#' + last;
+    return { acc, t, eg, arrive, totalMin: (arrive - leave) / 60000, key, hasRide: rides.length > 0 };
+  }
+  const good = r => r && !r.error && r.hasRide;
+  const depart = (leave, acc) => new Date(leave.getTime() + acc.preMin * 60000);
+
+  // ---------- planning ----------
+  async function resolveOrigin() {
+    const txt = $('#from').value.trim();
+    if (gps && txt === gps.label) return gps;
+    if (home && txt === home.label) return { name: 'home', ...home };
+    if (!txt) throw new Error('Enter where you’re starting from, or tap Use my location.');
+    const p = await findPlace(txt);
+    home = { ...p, label: txt };
+    store.set('bt_home', home);
+    return home;
+  }
+
+  function leaveTime() {
+    const now = new Date(Date.now() + 60000);
+    const v = $('#leave').value;
+    if (!v) return now;
+    const [h, m] = v.split(':').map(Number);
+    const t = new Date(); t.setHours(h, m, 0, 0);
+    if (t < now) t.setDate(t.getDate() + 1);
+    return t;
   }
 
   async function run(e) {
@@ -427,77 +591,140 @@
     $('#go').disabled = true;
     $('#go').textContent = 'Finding routes…';
     $('#results').innerHTML = '';
+    const notes = [];
     try {
-      status('Finding your start point…');
+      const start = new Set(settings.start), end = new Set(settings.end);
+      status('Finding your start and destination…');
       const o = await resolveOrigin();
-      status('Finding your destination…');
-      const dest = await findPlace(toText, o);
+      const [dest] = await Promise.all([findPlace(toText, o), loadParking()]);
       saveRecent(toText);
       const leave = leaveTime();
-
-      status('Looking for stations and bus stops nearby…');
-      const radius = Math.min(settings.maxKm * 1000, 50000);
       const busN = Math.max(0, Math.min(20, Math.round(settings.busCount)));
-      const [rail, bus] = await Promise.all([
-        nearby(o, ['subway_station', 'train_station', 'light_rail_station'], 20, radius),
-        busN ? nearby(o, ['bus_stop', 'bus_station'], busN, radius) : []
-      ]);
-      const stops = [
-        ...rail.map(s => ({ ...s, kind: 'rail' })),
-        ...bus.filter(b => !rail.some(r => r.id === b.id)).map(s => ({ ...s, kind: 'bus' }))
-      ];
+      const maxM = maxBikeM();
+      const wantShare = start.has('share') || end.has('share');
+      if (wantShare && !parking.count) notes.push('Share-bike options are off because parking.json isn’t in your repository yet.');
 
-      status('Checking cycle times to ' + stops.length + ' stops…');
-      const bikes = await bikeDistances(o, stops);
-      const maxM = settings.maxKm * 1000 * 1.25;
-      const cands = stops.map((s, i) => ({ ...s, meters: bikes[i].meters, est: bikes[i].est })).filter(s => s.meters <= maxM);
+      const base = transit(o, dest, leave).then(t => t ? buildOption(accessWalk(o), t, null, leave) : null).catch(err => ({ error: err }));
 
-      status('Checking transit from ' + cands.length + ' stops…');
-      const basePromise = transit(o, dest, leave)
-        .then(t => t ? makeOption({ kind: 'walk' }, t, leave) : null)
-        .catch(err => ({ error: err }));
-      const planFrom = async s => {
-        const bikeMin = s.meters / 1000 / settings.speed * 60;
-        const parkMin = s.kind === 'rail' ? settings.parkRail : settings.parkBus;
-        const dep = new Date(leave.getTime() + (bikeMin + parkMin) * 60000);
-        const t = await transit(s, dest, dep);
-        return t ? makeOption({ kind: 'bike', stop: s, bikeMin, parkMin, origin: o }, t, leave) : null;
-      };
-      const results = await pool(cands, 6, planFrom);
-
-      // Second pass: if a route starts with a walk to a different stop,
-      // try cycling straight to the stop where you actually board.
-      const boardMap = new Map();
-      for (const r of results) {
-        if (!r || r.error || !r.hasRide) continue;
-        const b = boardingStop(r.transit);
-        if (b && b.walkMin >= 2) {
-          const k = b.lat.toFixed(4) + ',' + b.lng.toFixed(4);
-          if (!boardMap.has(k)) boardMap.set(k, b);
+      // 1. Ways to reach transit from the start.
+      const accesses = [];
+      let stops = [], ownBikes = [], spotA = null;
+      if (start.has('own') || (start.has('share') && parking.count)) {
+        status('Looking for stations and bus stops near your start…');
+        stops = await findStops(o, busN);
+      }
+      if (start.has('own') && stops.length) {
+        ownBikes = (await bikeMatrix([o], stops))[0];
+        stops.forEach((s, i) => { if (ownBikes[i].meters <= maxM) accesses.push(accessOwn(o, s, ownBikes[i], false)); });
+      }
+      if (start.has('share') && parking.count) {
+        spotA = nearestParking(o, settings.shareWalkM, true);
+        if (!spotA) notes.push('No share-bike parking within ' + settings.shareWalkM + ' m of your start.');
+        else {
+          const pairs = stops.map(s => ({ s, spot: nearestParking(s, 250, true) })).filter(x => x.spot && haversine(x.spot, spotA) > 150);
+          const mm = (await bikeMatrix([spotA], pairs.map(x => x.spot)))[0];
+          pairs.forEach((x, i) => { if (mm[i].meters <= maxM) accesses.push(accessShare(o, x.s, spotA, x.spot, mm[i])); });
         }
       }
-      let extra = [];
-      const boards = [...boardMap.values()];
-      if (boards.length) {
-        status('Checking cycling straight to ' + boards.length + ' boarding points…');
-        const bd = await bikeDistances(o, boards);
-        const bc = boards.map((s, i) => ({ ...s, meters: bd[i].meters, est: bd[i].est })).filter(s => s.meters <= maxM);
-        extra = await pool(bc, 6, planFrom);
+
+      status('Checking transit from ' + (accesses.length + 1) + ' starting points…');
+      const pass1 = await pool(accesses, 6, async a => {
+        const t = await transit(a.place, dest, depart(leave, a));
+        return t ? buildOption(a, t, null, leave) : null;
+      });
+
+      // 2. If a route starts by walking to a different stop, try biking straight there.
+      const boards = { own: new Map(), share: new Map() };
+      for (const r of pass1) {
+        if (!good(r) || !boards[r.acc.mode]) continue;
+        const b = boardingStop(r.t);
+        if (b && b.walkMin >= 2) boards[r.acc.mode].set(b.lat.toFixed(4) + ',' + b.lng.toFixed(4), b);
       }
-      const base = await basePromise;
+      const extraAcc = [];
+      const ownBoards = [...boards.own.values()];
+      if (ownBoards.length) {
+        const mm = (await bikeMatrix([o], ownBoards))[0];
+        ownBoards.forEach((s, i) => { if (mm[i].meters <= maxM) extraAcc.push(accessOwn(o, s, mm[i], false)); });
+      }
+      const shareBoards = [...boards.share.values()].map(s => ({ s, spot: nearestParking(s, 250, true) })).filter(x => x.spot);
+      if (shareBoards.length && spotA) {
+        const mm = (await bikeMatrix([spotA], shareBoards.map(x => x.spot)))[0];
+        shareBoards.forEach((x, i) => { if (mm[i].meters <= maxM) extraAcc.push(accessShare(o, x.s, spotA, x.spot, mm[i])); });
+      }
+      if (extraAcc.length) status('Checking cycling straight to ' + extraAcc.length + ' boarding points…');
+      const pass1b = await pool(extraAcc, 6, async a => {
+        const t = await transit(a.place, dest, depart(leave, a));
+        return t ? buildOption(a, t, null, leave) : null;
+      });
+      const baseOpt = await base;
+      const baseOk = good(baseOpt) ? baseOpt : null;
+      const firstMile = pass1.concat(pass1b).filter(good);
 
-      const ok = results.concat(extra).filter(r => r && !r.error && r.hasRide);
-      const firstErr = results.find(r => r?.error)?.error || base?.error;
-      if (!ok.length && firstErr) throw firstErr;
+      // 3. Ways to finish the trip by bike.
+      const egressOpts = [];
+      const wantFold = end.has('fold') && start.has('own');
+      if (end.has('fold') && !start.has('own')) notes.push('A foldable bike at the end needs “Own bike” at the start too.');
+      if ((end.has('share') && parking.count) || wantFold) {
+        status('Looking for stops near your destination…');
+        const alights = await findStops(dest, Math.min(busN, 6));
 
-      ok.sort((a, b) => a.totalMin - b.totalMin);
-      const seen = new Set(), top = [];
-      for (const r of ok) { if (!seen.has(r.key)) { seen.add(r.key); top.push(r); } if (top.length >= 6) break; }
+        // Best few ways to start, from what we've already checked.
+        const ranked = firstMile.concat(baseOk ? [baseOk] : []).filter(r => start.has(r.acc.mode)).sort((a, b) => a.totalMin - b.totalMin);
+        const topAcc = [], seen = new Set();
+        for (const r of ranked) {
+          const k = r.acc.mode + r.acc.place.lat + ',' + r.acc.place.lng;
+          if (!seen.has(k)) { seen.add(k); topAcc.push(r.acc); }
+          if (topAcc.length >= 3) break;
+        }
 
-      const baseOk = base && !base.error ? base : null;
-      if (!top.length && !baseOk) return status('No transit routes found. Try a different time or destination.', true);
+        const jobs = [];
+        if (end.has('share') && parking.count) {
+          const spotD = nearestParking(dest, settings.shareWalkM, true);
+          if (!spotD) notes.push('No share-bike parking within ' + settings.shareWalkM + ' m of your destination.');
+          else {
+            const pairs = alights.map(A => ({ A, spot: nearestParking(A, 250, true) })).filter(x => x.spot && haversine(x.spot, spotD) > 150);
+            const mm = (await bikeMatrix(pairs.map(x => x.spot), [spotD])).map(r => r[0]);
+            const egs = pairs.map((x, i) => mm[i].meters <= maxM ? egressShare(x.A, dest, x.spot, spotD, mm[i]) : null)
+              .filter(Boolean).sort((a, b) => a.postMin - b.postMin).slice(0, 6);
+            for (const acc of topAcc) for (const eg of egs) if (haversine(acc.place, eg.place) > 300) jobs.push({ acc, eg });
+          }
+        }
+        if (wantFold) {
+          const ownRanked = firstMile.filter(r => r.acc.mode === 'own').sort((a, b) => a.totalMin - b.totalMin);
+          const foldAcc = [], seenF = new Set();
+          for (const r of ownRanked) {
+            const k = r.acc.place.lat + ',' + r.acc.place.lng;
+            if (!seenF.has(k)) { seenF.add(k); foldAcc.push(accessOwn(o, r.acc.place, r.acc.bike, true)); }
+            if (foldAcc.length >= 2) break;
+          }
+          const mm = (await bikeMatrix(alights, [dest])).map(r => r[0]);
+          const egs = alights.map((A, i) => mm[i].meters <= maxM ? egressOwn(A, dest, mm[i]) : null)
+            .filter(Boolean).sort((a, b) => a.postMin - b.postMin).slice(0, 5);
+          for (const acc of foldAcc) for (const eg of egs) if (haversine(acc.place, eg.place) > 300) jobs.push({ acc, eg });
+        }
 
-      status(top.length ? 'Fastest first. Times include cycling and parking.' : 'No cycle-to stops worked, so here’s the regular route.');
+        if (jobs.length) status('Checking ' + jobs.length + ' ways to finish by bike…');
+        const res = await pool(jobs, 6, async j => {
+          const t = await transit(j.acc.place, j.eg.place, depart(leave, j.acc));
+          return t ? buildOption(j.acc, t, j.eg, leave) : null;
+        });
+        egressOpts.push(...res.filter(good));
+      }
+
+      // 4. Combine, keep the best version of each journey.
+      const all = (end.has('walk') ? firstMile.filter(r => start.has(r.acc.mode)) : []).concat(egressOpts);
+      if (!all.length && !baseOk) {
+        const err = pass1.find(r => r?.error)?.error || baseOpt?.error;
+        if (err) throw err;
+        return status('No transit routes found. Try a different time or destination.', true);
+      }
+      all.sort((a, b) => a.totalMin - b.totalMin);
+      const keys = new Set(), top = [];
+      for (const r of all) { if (!keys.has(r.key)) { keys.add(r.key); top.push(r); } if (top.length >= 8) break; }
+
+      const walkOnly = settings.start.join() === 'walk' && settings.end.join() === 'walk';
+      status((top.length ? 'Fastest first. Times include cycling, parking and walking.' : walkOnly ? 'Here’s the regular route. Pick a bike option above to compare.' : 'No bike options worked for this trip, so here’s the regular route.') +
+        (notes.length ? ' ' + notes.join(' ') : ''));
       render(top, baseOk, dest);
     } catch (err) {
       let msg = err.message || String(err);
@@ -510,38 +737,28 @@
   }
 
   // ---------- rendering ----------
-  function segments(opt) {
-    const segs = [];
-    if (opt.kind === 'bike') {
-      segs.push({ cls: 'bike', min: opt.bikeMin, text: Math.round(opt.bikeMin) });
-      if (opt.parkMin > 0) segs.push({ cls: 'park', min: opt.parkMin, text: '' });
-    }
-    const rideSegs = []; let walk = 0, sum = 0;
-    const flush = () => { if (walk > 0.5) rideSegs.push({ cls: 'walk', min: walk, text: Math.round(walk) }); walk = 0; };
-    for (const s of opt.transit.steps) {
+  const MODE_NAME = { walk: 'Walk', own: 'Own bike', fold: 'Own bike', share: 'Share bike' };
+
+  function transitSegs(t) {
+    const out = []; let walk = 0, sum = 0;
+    const flush = () => { if (walk > 0.5) out.push({ cls: 'walk', min: walk, text: Math.round(walk) }); walk = 0; };
+    for (const s of t.steps) {
       const m = secs(s.staticDuration) / 60; sum += m;
       if (s.travelMode === 'TRANSIT') {
         flush();
         const l = lineOf(s);
-        rideSegs.push({ cls: l.vehicle?.type === 'BUS' ? 'bus' : 'rail', min: m, text: lineLabel(s), color: l.color, textColor: l.textColor });
+        out.push({ cls: l.vehicle?.type === 'BUS' ? 'bus' : 'rail', min: m, text: lineLabel(s), color: l.color, textColor: l.textColor });
       } else walk += m;
     }
     flush();
-    const wait = opt.transit.secs / 60 - sum;
-    if (wait >= 1) segs.push({ cls: 'wait', min: wait, text: '' });
-    return segs.concat(rideSegs);
+    const wait = t.secs / 60 - sum;
+    return (wait >= 1 ? [{ cls: 'wait', min: wait }] : []).concat(out);
   }
 
-  function stepList(opt) {
-    const items = [];
-    if (opt.kind === 'bike') {
-      const s = opt.stop;
-      items.push('Cycle ' + (s.est ? '≈' : '') + Math.round(opt.bikeMin) + ' min to ' + esc(s.name) + ' (' + (s.meters / 1000).toFixed(1) + ' km)');
-    }
-    let walk = 0;
+  function transitLines(t, endsAtStop) {
+    const items = []; let walk = 0;
     const flush = () => { if (walk >= 1) items.push('Walk ' + Math.round(walk) + ' min'); walk = 0; };
-    for (const s of opt.transit.steps) {
-      const m = secs(s.staticDuration) / 60;
+    for (const s of t.steps) {
       if (s.travelMode === 'TRANSIT') {
         flush();
         const sd = s.transitDetails?.stopDetails || {};
@@ -549,52 +766,48 @@
         const dep = sd.departureTime ? ' at ' + fmtTime(new Date(sd.departureTime)) : '';
         items.push(esc(lineLabel(s)) + dep + ' from ' + esc(sd.departureStop?.name) + ' to ' + esc(sd.arrivalStop?.name) +
           (n ? ' (' + n + ' stop' + (n > 1 ? 's' : '') + ')' : ''));
-      } else walk += m;
+      } else walk += secs(s.staticDuration) / 60;
     }
-    flush();
-    return items.map(t => '<li>' + t + '</li>').join('');
+    if (!endsAtStop) flush(); else if (walk >= 1) items.push('Walk ' + Math.round(walk) + ' min to the bike');
+    return items;
   }
 
-  const mapsLink = (a, b, mode) =>
-    'https://www.google.com/maps/dir/?api=1&origin=' + a.lat + ',' + a.lng + '&destination=' + b.lat + ',' + b.lng + '&travelmode=' + mode;
-
   function card(opt, dest, base, best) {
-    const segs = segments(opt);
+    const { acc, eg, t } = opt;
+    const segs = acc.segs.concat(transitSegs(t), eg ? eg.segs : []).filter(s => s.min > 0.3);
     const strip = segs.map(s => {
-      const style = 'flex-grow:' + Math.max(s.min, 0.5).toFixed(2) +
-        (s.color ? ';background:' + esc(s.color) + ';color:' + esc(s.textColor || '#fff') : '');
-      const label = s.min >= 4 ? esc(s.text) : '';
+      const style = 'flex-grow:' + s.min.toFixed(2) + (s.color ? ';background:' + esc(s.color) + ';color:' + esc(s.textColor || '#fff') : '');
+      const label = s.min >= 4 && s.text != null ? esc(s.text) : '';
       return '<div class="seg ' + s.cls + '" style="' + style + '">' + label + '</div>';
     }).join('');
 
     let tag = '';
-    if (opt.kind === 'bike' && base) {
+    if (base && opt !== base) {
       const diff = Math.round(base.totalMin - opt.totalMin);
-      tag = diff >= 1 ? '<span class="tag good">' + diff + ' min faster than walking from home</span>'
-          : diff <= -1 ? '<span class="tag">' + (-diff) + ' min slower than walking from home</span>' : '';
+      tag = diff >= 1 ? '<span class="tag good">' + diff + ' min faster than walking only</span>'
+          : diff <= -1 ? '<span class="tag">' + (-diff) + ' min slower than walking only</span>' : '';
     }
-    const title = opt.kind === 'bike'
-      ? '<p class="start">Cycle to ' + esc(opt.stop.name) + '</p>'
-      : '<p class="start">Walk from home (no bike)</p>';
-    const links = opt.kind === 'bike'
-      ? '<a href="' + mapsLink(opt.origin, opt.stop, 'bicycling') + '" target="_blank" rel="noopener">Cycle route</a>' +
-        '<a href="' + mapsLink(opt.stop, dest, 'transit') + '" target="_blank" rel="noopener">Transit from there</a>'
-      : '';
+    const startName = MODE_NAME[acc.mode], endName = eg ? MODE_NAME[eg.mode] : 'Walk';
+    const title = (acc.mode === 'walk' && !eg) ? 'Walk only (no bike)' : startName + ' → transit → ' + endName;
+    const lines = acc.lines.concat(transitLines(t, !!eg), eg ? eg.lines : []);
+    const links = acc.links.concat(
+      acc.mode === 'walk' && !eg ? [] : [mapsLink(acc.place, eg ? eg.place : dest, 'transit', 'Transit part')],
+      eg ? eg.links : []);
 
-    return '<article class="result' + (best ? ' best' : '') + (opt.kind === 'walk' ? ' base' : '') + '">' +
+    return '<article class="result' + (best ? ' best' : '') + (opt === base ? ' base' : '') + '">' +
       '<div class="headline"><span class="mins">' + Math.round(opt.totalMin) + ' <small>min</small></span>' +
       '<span class="arrive">Arrive ' + fmtTime(opt.arrive) + '</span></div>' +
-      tag + title +
+      tag + '<p class="start">' + title + '</p>' +
       '<div class="strip" aria-hidden="true">' + strip + '</div>' +
-      '<ol class="steps">' + stepList(opt) + '</ol>' +
-      (links ? '<div class="links">' + links + '</div>' : '') +
+      '<ol class="steps">' + lines.map(x => '<li>' + x + '</li>').join('') + '</ol>' +
+      (links.length ? '<div class="links">' + links.map(l => '<a href="' + l.href + '" target="_blank" rel="noopener">' + l.label + '</a>').join('') + '</div>' : '') +
       '</article>';
   }
 
   function render(top, base, dest) {
     $('#results').innerHTML =
       top.map((o, i) => card(o, dest, base, i === 0)).join('') +
-      (base ? card(base, dest, null, false) : '');
+      (base ? card(base, dest, base, false) : '');
   }
 
   // ---------- recent destinations ----------
@@ -624,6 +837,7 @@
   if (home) $('#from').value = home.label;
   renderRecent();
   showSetup();
+  loadParking();
   $('#trip').addEventListener('submit', run);
   $('#jswarn').hidden = true;
 })();
