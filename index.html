@@ -263,7 +263,7 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
 
-  const APP_VERSION = '2026-11-05.7';
+  const APP_VERSION = '2026-11-06.1';
   const NUM_DEFAULTS = { maxKm: 1.6, speed: 15, walkSpeed: 5, parkRail: 3, parkBus: 2, shareMin: 2, shareWalkM: 400, busCount: 8 };
   const DEFAULTS = { ...NUM_DEFAULTS, start: ['walk', 'own'], end: ['walk', 'share'] };
   let settings = { ...DEFAULTS, ...store.get('bt_settings', {}) };
